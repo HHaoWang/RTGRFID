@@ -1,5 +1,6 @@
 from typing import Callable
 
+import numpy as np
 import pandas
 import pandas as pd
 
@@ -24,4 +25,6 @@ class FileDataCollector(DataCollector):
             columns.append(name)
         data.columns = columns
         data = data.loc[:, ["EPC", "Antenna", "RSSI", "PhaseAngle"]].copy()
+        data["RSSI"] = data["RSSI"].astype(np.float32)
+        data["PhaseAngle"] = data["PhaseAngle"].astype(np.float32)
         self.on_collected_data(data, False)

@@ -157,8 +157,8 @@ class DataProvider:
             if len(self.__current_window) == self.data_window_size:
                 self.__current_window.pop(0)
                 self.__current_window.append(self.processed_data.get())
-                yield self.__current_window
+                yield np.array(self.__current_window)
             else:
                 while len(self.__current_window) < self.data_window_size:
                     self.__current_window.append(self.processed_data.get())
-                yield self.__current_window
+                yield np.array(self.__current_window)

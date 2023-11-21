@@ -1,6 +1,7 @@
 import numpy as np
 from FileDataCollector import FileDataCollector
 from DataProvider import DataProvider
+from RTGRFID import RTGRFID
 
 dataPath = r"C:\Users\HHao\OneDrive\学习\研究生\小论文\实验数据\2023-11-04_13-20-41.csv"
 numberOfRows = 3
@@ -27,7 +28,8 @@ dataProvider.start()
 fileDataCollector.start_collect()
 
 values = dataProvider.get_data_window()
-count = 0
-for i in values:
-    count += 1
-print(count)
+value = next(values)
+print(value.shape)
+
+model = RTGRFID()
+model.forward(value)
