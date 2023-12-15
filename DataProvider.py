@@ -1,78 +1,15 @@
-import datetime
 import time
 from queue import Queue
 from threading import Thread
-from typing import TypedDict
 
 import numpy
 import numpy as np
-import pandas as pd
 import pandas.core.groupby
-from scipy.signal import savgol_filter
 
 # noinspection PyUnresolvedReferences
 import DrawUntil
 from DataCollector import DataCollector
-
-
-class TimeSpan(TypedDict):
-    startTime: datetime.datetime
-    endTime: datetime.datetime
-
-
-def process_single_tag_data(tag_data: pandas.DataFrame, time_span: TimeSpan):
-    unwrap_first = True
-    padded_data: pandas.DataFrame = tag_data.loc[:, ["RSSI", "PhaseAngle"]].copy()
-    if unwrap_first:
-        padded_data["PhaseAngle"] = np.unwrap(padded_data["PhaseAngle"])
-
-    epc = tag_data.iloc[0]["EPC"]
-    antenna = tag_data.iloc[0]["Antenna"]
-
-    old_idx = padded_data.index
-    new_idx = pd.date_range(time_span["startTime"], time_span["endTime"], freq='50ms')
-    res = (padded_data.reindex(old_idx.union(new_idx))
-           .interpolate('index', limit_direction="both")
-           .reindex(new_idx))
-    res["EPC"] = [epc for _ in range(len(res))]
-    res["Antenna"] = [antenna for _ in range(len(res))]
-    resampled_data = res.copy()
-    resampled_data["RSSI"] = savgol_filter(res["RSSI"], 10, 3, mode="nearest")
-    if unwrap_first:
-        resampled_data["PhaseAngle"] = savgol_filter(res["PhaseAngle"], 10, 3, mode="nearest")
-    else:
-        resampled_data["PhaseAngle"] = savgol_filter(np.unwrap(res["PhaseAngle"]), 10, 3, mode="nearest")
-    return resampled_data
-
-
-def process_tag_array_data(raw_data: pandas.core.groupby.DataFrameGroupBy,
-                           tag_epc_array: numpy.ndarray,
-                           time_span: TimeSpan) -> tuple[list[list[list[float]]], list[list[list[float]]]]:
-    tag_array_data = np.asarray(
-        [raw_data.get_group(tag_epc_array.flatten().tolist()[i]) for i in range(tag_epc_array.size)],
-        dtype=object).reshape(tag_epc_array.shape)
-
-    for indexRow, row in enumerate(tag_array_data):
-        for indexCol, tag_data in enumerate(row):
-            tag_array_data[indexRow][indexCol] = process_single_tag_data(tag_data, time_span)
-
-    # DrawUntil.draw_tag_array_data(tag_array_data, selected_col="PhaseAngle")
-    # DrawUntil.draw_tag_array_data(tag_array_data, selected_col="RSSI")
-
-    rssi, phase = [], []
-    length = len(tag_array_data[0][0])
-    for i in range(length):
-        rssi_frame, phase_frame = [], []
-        for indexRow, row in enumerate(tag_array_data):
-            rssi_frame_row, phase_frame_row = [], []
-            for indexCol, tag_data in enumerate(row):
-                rssi_frame_row.append(tag_data.iloc[i]["RSSI"])
-                phase_frame_row.append(tag_data.iloc[i]["PhaseAngle"])
-            rssi_frame.append(rssi_frame_row)
-            phase_frame.append(phase_frame_row)
-        rssi.append(rssi_frame)
-        phase.append(phase_frame)
-    return rssi, phase
+from DataPreprocess import TimeSpan, process_tag_array_data
 
 
 class DataProvider:
