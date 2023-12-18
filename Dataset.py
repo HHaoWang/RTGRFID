@@ -70,13 +70,28 @@ def preprocess_data_in_pandas(raw_data: pandas.DataFrame, tag_epc_array1, tag_ep
     return np.array(processed_data)
 
 
-def get_data(data_directory: str, tag_epc_array1, tag_epc_array2, seq_len: int):
+def get_data(data_directory: str, tag_epc_array1, tag_epc_array2, seq_len: int, validate_data_rate: float):
     dataset_in_pandas = get_data_in_pandas(data_directory)
-    processed_data = []
-    labels = []
     keys_in_one_hot = get_one_hot(dataset_in_pandas.keys())
+
+    validate_data = []
+    validate_labels = []
+
+    training_data = []
+    training_labels = []
+
     for key in dataset_in_pandas:
-        for data in dataset_in_pandas[key]:
-            processed_data.append(preprocess_data_in_pandas(data, tag_epc_array1, tag_epc_array2, seq_len))
-            labels.append(keys_in_one_hot[key])
-    return np.array(processed_data), np.array(labels)
+        cnt = len(dataset_in_pandas[key])
+        validate_data_cnt = int(validate_data_rate * cnt)
+        idx = np.arange(cnt)
+        np.random.shuffle(idx)
+        for index in idx[:validate_data_cnt]:
+            validate_data.append(
+                preprocess_data_in_pandas(dataset_in_pandas[key][index], tag_epc_array1, tag_epc_array2, seq_len))
+            validate_labels.append(keys_in_one_hot[key])
+        for index in idx[validate_data_cnt:]:
+            training_data.append(
+                preprocess_data_in_pandas(dataset_in_pandas[key][index], tag_epc_array1, tag_epc_array2, seq_len))
+            training_labels.append(keys_in_one_hot[key])
+    return ((np.array(training_data), np.array(training_labels)),
+            (np.array(validate_data), np.array(validate_labels)), dataset_in_pandas.keys())

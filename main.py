@@ -22,27 +22,17 @@ tagArray1 = np.array([
     ['E280689400005013F1509518', 'E280689400004013F150AD18', 'E280689400004013F150A118'],
 ])
 
-seq_len = 100
-epochs = 20
+seq_len = 90
+epochs = 50
 
-data, labels = Dataset.get_data(dataDirectory, tagArray1, tagArray2, seq_len)
+(train_data, train_labels), (valid_data, valid_labels), classes = Dataset.get_data(dataDirectory, tagArray1, tagArray2, seq_len,
+                                                                                   0.3)
 
 print("数据集准备完毕\n")
 
-model = RTGRFID(seq_len)
+model = RTGRFID(seq_len, len(classes))
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters())
-
-idx = [i for i in range(len(data))]
-np.random.shuffle(idx)
-train_data_size = int(len(data) * 0.7)
-train_data_idx = idx[:train_data_size]
-valid_data_idx = idx[train_data_size:]
-
-train_data = data[train_data_idx]
-train_labels = labels[train_data_idx]
-valid_data = data[valid_data_idx]
-valid_labels = labels[valid_data_idx]
 
 for epoch in range(epochs):
     idx = [i for i in range(len(train_data))]
@@ -60,15 +50,15 @@ for epoch in range(epochs):
 
     model.eval()
     with torch.no_grad():
-        y_true = [utils.one_hot_to_string(label) for label in valid_labels]
+        y_true_labels = [utils.one_hot_to_string(label) for label in valid_labels]
         y_pred_proba = []
         y_pred_labels = []
         for i in range(len(valid_data)):
             x = valid_data[i]
             y = torch.tensor(valid_labels[i])
             y_pred = model(x)
-            # y_pred_proba.append(y_pred)
+            y_pred_proba.append(y_pred)
             y_pred_labels.append(utils.one_hot_to_string(utils.convert_to_one_hot(y_pred)))
 
-        accuracy = metrics.accuracy_score(y_true, y_pred_labels)
-        print('Epoch:{},  Accuracy:{:.4f}'.format(epoch, accuracy))
+        accuracy = metrics.accuracy_score(y_true_labels, y_pred_labels)
+        print(f'Epoch:{epoch + 1:00},  Accuracy:{accuracy:.4f}')

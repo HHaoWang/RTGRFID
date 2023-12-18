@@ -4,7 +4,7 @@ from torch import nn
 
 
 class RTGRFID(nn.Module):
-    def __init__(self, seq_len: int) -> None:
+    def __init__(self, seq_len: int, num_classes: int) -> None:
         super().__init__()
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         embed_dim = 4 * 3 * 3
@@ -13,7 +13,7 @@ class RTGRFID(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(seq_len, 64),
             nn.ReLU(),
-            nn.Linear(64, 2),
+            nn.Linear(64, num_classes),
             # nn.Softmax(dim=0)
         )
 
