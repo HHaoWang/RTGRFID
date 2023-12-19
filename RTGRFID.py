@@ -13,7 +13,9 @@ class RTGRFID(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(seq_len, 64),
             nn.ReLU(),
-            nn.Linear(64, num_classes),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, num_classes)
             # nn.Softmax(dim=0)
         )
 

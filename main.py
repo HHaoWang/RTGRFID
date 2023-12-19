@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from sklearn import metrics
 from torch import nn
+from openpyxl import Workbook
 
 import Dataset
 import utils
@@ -30,10 +31,11 @@ epochs = 50
 
 print("数据集准备完毕\n")
 
+results = []
+
 model = RTGRFID(seq_len, len(classes))
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters())
-
 for epoch in range(epochs):
     idx = [i for i in range(len(train_data))]
     np.random.shuffle(idx)
@@ -61,4 +63,31 @@ for epoch in range(epochs):
             y_pred_labels.append(utils.one_hot_to_string(utils.convert_to_one_hot(y_pred)))
 
         accuracy = metrics.accuracy_score(y_true_labels, y_pred_labels)
+        results.append([])
+        for (index, pred_label) in enumerate(y_pred_labels):
+            if pred_label != y_true_labels[index]:
+                results[epoch].append((y_true_labels[index], pred_label))
         print(f'Epoch:{epoch + 1:00},  Accuracy:{accuracy:.4f}')
+
+print('训练结束，导出结果中...')
+
+wb = Workbook()
+ws = wb.active
+ws.title = "说明"
+ws['A1'] = "序号"
+ws['B1'] = "名称"
+for i, class_ in enumerate(classes):
+    cell = ws.cell(row=i + 2, column=1)
+    cell.value = i
+    cell = ws.cell(row=i + 2, column=2)
+    cell.value = class_
+for index, result in enumerate(results):
+    ws = wb.create_sheet(str(index + 1))
+    ws['A1'] = "实际值"
+    ws['B1'] = "预测值"
+    for i, epoch_result in enumerate(result):
+        cell = ws.cell(row=i + 2, column=1)
+        cell.value = str(epoch_result[0])
+        cell = ws.cell(row=i + 2, column=2)
+        cell.value = str(epoch_result[1])
+wb.save('结果.xlsx')
