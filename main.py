@@ -9,6 +9,7 @@ import utils
 from RTGRFID import RTGRFID
 
 dataDirectory = r"C:\Users\HHao\OneDrive\学习\研究生\小论文\实验数据\33"
+userDataDirectory = r"C:\Users\HHao\OneDrive\学习\研究生\小论文\实验数据\User2"
 numberOfRows = 3
 numberOfCols = 3
 tagArray2 = np.array([
@@ -24,31 +25,45 @@ tagArray1 = np.array([
 ])
 
 seq_len = 90
-epochs = 50
+epochs = 150
 
 (train_data, train_labels), (valid_data, valid_labels), classes = Dataset.get_data(dataDirectory, tagArray1, tagArray2, seq_len,
                                                                                    0.3)
-
+((user_train_data, user_train_labels), (user_valid_data, user_valid_labels),
+ users_classes) = Dataset.get_data(userDataDirectory, tagArray1, tagArray2,
+                                   seq_len, 1.0)
 print("数据集准备完毕\n")
 
 results = []
-
-model = RTGRFID(seq_len, len(classes))
-criterion = nn.CrossEntropyLoss()
+acc = 0
+model = RTGRFID(seq_len, len(classes), 2)
+gesture_criterion = nn.CrossEntropyLoss()
+user_criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters())
+train_data_len = len(train_data)
 for epoch in range(epochs):
-    idx = [i for i in range(len(train_data))]
+    idx = [i for i in range(train_data_len)]
     np.random.shuffle(idx)
     model.train()
     for i in range(len(idx)):
-        x = train_data[idx[i]]
-        y = torch.tensor(train_labels[idx[i]])
-        y_pred = model(x)
-        loss = criterion(y_pred, y)
+        p = float(i + epoch * train_data_len) / epochs / train_data_len
+        alpha = 2. / (1. + np.exp(-10 * p)) - 1
+        x_src = train_data[idx[i]]
+        gestures_labels_true_src = torch.tensor(train_labels[idx[i]])
+        user_labels_true_src = torch.tensor([1, 0])
+        gestures_labels_pred_src, user_label_pred_src = model(x_src, alpha)
+        gestures_loss_src = gesture_criterion(gestures_labels_pred_src, gestures_labels_true_src)
+        user_loss_src = user_criterion(user_label_pred_src, user_labels_true_src)
+
+        x_u = user_train_data[idx[i]]
+        user_label_true_u = torch.tensor([0, 1])
+        _, user_label_pred_u = model(x_u, alpha)
+        user_loss_u = user_criterion(user_label_pred_u, user_label_true_u)
+
+        loss_all = gestures_loss_src + user_loss_src + user_loss_u
         optimizer.zero_grad()
-        loss.backward()
+        loss_all.backward()
         optimizer.step()
-        # print('Epoch: {}, Loss: {}'.format(epoch, loss))
 
     model.eval()
     with torch.no_grad():
@@ -56,18 +71,31 @@ for epoch in range(epochs):
         y_pred_proba = []
         y_pred_labels = []
         for i in range(len(valid_data)):
-            x = valid_data[i]
+            x_src = valid_data[i]
             y = torch.tensor(valid_labels[i])
-            y_pred = model(x)
+            y_pred = model(x_src)
             y_pred_proba.append(y_pred)
             y_pred_labels.append(utils.one_hot_to_string(utils.convert_to_one_hot(y_pred)))
 
         accuracy = metrics.accuracy_score(y_true_labels, y_pred_labels)
+        if accuracy > acc:
+            torch.save(model, './model/bestModel.pth')
         results.append([])
         for (index, pred_label) in enumerate(y_pred_labels):
             if pred_label != y_true_labels[index]:
                 results[epoch].append((y_true_labels[index], pred_label))
         print(f'Epoch:{epoch + 1:00},  Accuracy:{accuracy:.4f}')
+
+        user_y_true_labels = [utils.one_hot_to_string(label) for label in user_valid_labels]
+        user_y_pred_labels = []
+        for i in range(len(user_valid_data)):
+            x_src = user_valid_data[i]
+            y = torch.tensor(user_valid_labels[i])
+            y_pred = model(x_src)
+            user_y_pred_labels.append(utils.one_hot_to_string(utils.convert_to_one_hot(y_pred)))
+
+        accuracy = metrics.accuracy_score(user_y_true_labels, user_y_pred_labels)
+        print(f'\t\t User Predict Accuracy:{accuracy:.4f}')
 
 print('训练结束，导出结果中...')
 

@@ -2,49 +2,98 @@ import numpy as np
 import torch
 from torch import nn
 
+import GradientReversalLayer
+from PositionalEncoding import PositionalEncoding
 
+
+# noinspection DuplicatedCode
 class RTGRFID(nn.Module):
-    def __init__(self, seq_len: int, num_classes: int) -> None:
+    def __init__(self, seq_len: int, num_gestures: int, num_users: int) -> None:
         super().__init__()
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        embed_dim = 4 * 3 * 3
-        self.labeler = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
-        self.label_extractors = [nn.Linear(embed_dim, 1) for _ in range(seq_len)]
-        self.mlp = nn.Sequential(
+        self.num_gestures = num_gestures
+        self.num_users = num_users
+        self.seq_len = seq_len
+
+        embed_dim = 2 * 3 * 3
+        self.pos_encoder_array = PositionalEncoding(embed_dim, dropout=0)
+        self.pos_encoder_cat = PositionalEncoding(embed_dim * 2, dropout=0)
+
+        self.gesture_labeler_array_1 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
+        self.gesture_labeler_array_2 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
+        self.gesture_labeler_cat = nn.MultiheadAttention(embed_dim * 2, 1, batch_first=True)
+        self.gesture_label_extractors = [nn.Linear(embed_dim * 2, 1) for _ in range(self.seq_len)]
+        self.gesture_mlp = nn.Sequential(
             nn.Linear(seq_len, 64),
             nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, num_classes)
-            # nn.Softmax(dim=0)
+            nn.Linear(64, self.num_gestures)
         )
 
-    def forward(self, x):
-        seq: list[torch.Tensor] = []
+        self.user_labeler_array_1 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
+        self.user_labeler_array_2 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
+        self.user_labeler_cat = nn.MultiheadAttention(embed_dim * 2, 1, batch_first=True)
+        self.user_label_extractors = [nn.Linear(embed_dim * 2, 1) for _ in range(self.seq_len)]
+        self.user_mlp = nn.Sequential(
+            nn.Linear(seq_len, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.num_users)
+        )
+
+    def forward(self, x, alpha):
+        seq_1: list[torch.Tensor] = []
+        seq_2: list[torch.Tensor] = []
         for frame in x:
-            merged_feature = torch.tensor([])
             # 每个frame包含两个阵列
-            for array in frame:
-                rss, phase = array
-                rss, phase = np.array([rss]), np.array([phase])
-                rss_tensor = torch.from_numpy(rss)
-                phase_tensor = torch.from_numpy(phase)
-                # c_rss = self.feature_extractor_rssi(rss_tensor)[0]
-                # c_phase = self.feature_extractor_phase(phase_tensor)[0]
-                c_rss = rss_tensor
-                c_phase = phase_tensor
-                merged_array_feature = torch.cat(
-                    (c_rss, c_phase), 1)
-                merged_feature = torch.cat((merged_feature, merged_array_feature), 0)
-            flattened_feature = merged_feature.flatten()
-            seq.append(flattened_feature)
-        seq: torch.Tensor = torch.stack(seq)
-        query = seq
-        key = seq
-        value = seq
-        attn_output, attn_output_weights = self.labeler(query, key, value)
-        mlp_input = torch.tensor([])
-        for (index, item) in enumerate(attn_output):
-            label = self.label_extractors[index](item)
-            mlp_input = torch.cat((mlp_input, label), 0)
-        return self.mlp(mlp_input)
+            rss, phase = frame[0]
+            rss, phase = np.array([rss]), np.array([phase])
+            rss_tensor = torch.from_numpy(rss)
+            phase_tensor = torch.from_numpy(phase)
+            merged_array_feature = torch.cat(
+                (rss_tensor, phase_tensor), 1)
+            seq_1.append(merged_array_feature.flatten())
+
+            # 每个frame包含两个阵列
+            rss, phase = frame[1]
+            rss, phase = np.array([rss]), np.array([phase])
+            rss_tensor = torch.from_numpy(rss)
+            phase_tensor = torch.from_numpy(phase)
+            merged_array_feature = torch.cat(
+                (rss_tensor, phase_tensor), 1)
+            seq_2.append(merged_array_feature.flatten())
+
+        seq_1: torch.Tensor = torch.stack(seq_1)
+        seq_1 = self.pos_encoder_array(seq_1)
+        seq_2: torch.Tensor = torch.stack(seq_2)
+        seq_2 = self.pos_encoder_array(seq_2)
+
+        # Gestures Labeler
+        seq_1_g = seq_1.copy()
+        seq_2_g = seq_2.copy()
+        attn_output_1_g, _ = self.gesture_labeler_array_1(seq_1_g, seq_1_g, seq_1_g)
+        attn_output_2_g, _ = self.gesture_labeler_array_2(seq_2_g, seq_2_g, seq_2_g)
+        seq_g: torch.Tensor = torch.cat((attn_output_1_g, attn_output_2_g), dim=1)
+        seq_g = self.pos_encoder_cat(seq_g)
+        attn_output_g, _ = self.gesture_labeler_cat(seq_g, seq_g, seq_g)
+        mlp_g_input = torch.tensor([])
+        for (index, item) in enumerate(attn_output_g):
+            label = self.gesture_label_extractors[index](item)
+            mlp_g_input = torch.cat((mlp_g_input, label), 0)
+        gestures_output = self.gesture_mlp(mlp_g_input)
+
+        # User Labeler
+        seq_1_u = seq_1.copy()
+        seq_2_u = seq_2.copy()
+        seq_1_u = GradientReversalLayer.GradientReversalLayer(seq_1_u, alpha)
+        seq_2_u = GradientReversalLayer.GradientReversalLayer(seq_2_u, alpha)
+        attn_output_1_u, _ = self.user_labeler_array_1(seq_1_u, seq_1_u, seq_1_u)
+        attn_output_2_u, _ = self.user_labeler_array_2(seq_2_u, seq_2_u, seq_2_u)
+        seq_u: torch.Tensor = torch.cat((attn_output_1_u, attn_output_2_u), dim=1)
+        seq_u = self.pos_encoder_cat(seq_u)
+        attn_output_u, _ = self.user_labeler_cat(seq_u, seq_u, seq_u)
+        mlp_u_input = torch.tensor([])
+        for (index, item) in enumerate(attn_output_u):
+            label = self.user_label_extractors[index](item)
+            mlp_u_input = torch.cat((mlp_u_input, label), 1)
+        user_output = self.user_mlp(mlp_u_input)
+
+        return gestures_output, user_output

@@ -17,18 +17,21 @@ def get_data_in_pandas(data_directory: str) -> dict:
         for file in classes_directory.iterdir():
             if not file.is_file():
                 continue
-            data = pd.read_csv(file, header=2, parse_dates=["// Timestamp"], index_col="// Timestamp")
-            columns = []
-            for columnName in data.columns:
-                name: str = columnName.strip()
-                name = name.strip("// ")
-                columns.append(name)
-            data.columns = columns
-            data: pd.DataFrame = data.loc[:, ["EPC", "Antenna", "RSSI", "PhaseAngle"]].copy()
-            data["RSSI"] = data["RSSI"].astype(np.float32)
-            data["PhaseAngle"] = data["PhaseAngle"].astype(np.float32)
-            data = data.drop_duplicates()
-            dataset[classes_directory.name].append(data)
+            try:
+                data = pd.read_csv(file, header=2, parse_dates=["// Timestamp"], index_col="// Timestamp")
+                columns = []
+                for columnName in data.columns:
+                    name: str = columnName.strip()
+                    name = name.strip("// ")
+                    columns.append(name)
+                data.columns = columns
+                data: pd.DataFrame = data.loc[:, ["EPC", "Antenna", "RSSI", "PhaseAngle"]].copy()
+                data["RSSI"] = data["RSSI"].astype(np.float32)
+                data["PhaseAngle"] = data["PhaseAngle"].astype(np.float32)
+                data = data.drop_duplicates()
+                dataset[classes_directory.name].append(data)
+            except Exception as e:
+                print(e)
     return dataset
 
 
