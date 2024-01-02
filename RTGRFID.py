@@ -18,9 +18,10 @@ class RTGRFID(nn.Module):
         self.pos_encoder_array = PositionalEncoding(embed_dim, dropout=0)
         self.pos_encoder_cat = PositionalEncoding(embed_dim * 2, dropout=0)
 
-        self.gesture_labeler_array_1 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
-        self.gesture_labeler_array_2 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
-        self.gesture_labeler_cat = nn.MultiheadAttention(embed_dim * 2, 1, batch_first=True)
+        self.feature_extractors_array_1 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
+        self.feature_extractors_array_2 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
+
+        self.gesture_labeler = nn.MultiheadAttention(embed_dim * 2, 1, batch_first=True)
         self.gesture_label_extractors = [nn.Linear(embed_dim * 2, 1) for _ in range(self.seq_len)]
         self.gesture_mlp = nn.Sequential(
             nn.Linear(seq_len, 64),
@@ -28,14 +29,18 @@ class RTGRFID(nn.Module):
             nn.Linear(64, self.num_gestures)
         )
 
-        self.user_labeler_array_1 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
-        self.user_labeler_array_2 = nn.MultiheadAttention(embed_dim, 1, batch_first=True)
-        self.user_labeler_cat = nn.MultiheadAttention(embed_dim * 2, 1, batch_first=True)
+        self.user_labeler = nn.MultiheadAttention(embed_dim * 2, 1, batch_first=True)
         self.user_label_extractors = [nn.Linear(embed_dim * 2, 1) for _ in range(self.seq_len)]
         self.user_mlp = nn.Sequential(
             nn.Linear(seq_len, 64),
             nn.ReLU(),
-            nn.Linear(64, self.num_users)
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Linear(16, 8),
+            nn.ReLU(),
+            nn.Linear(8, self.num_users),
         )
 
     def forward(self, x, alpha):
@@ -55,16 +60,17 @@ class RTGRFID(nn.Module):
             seq_2.append(merged_array_feature.flatten())
 
         seq_1: torch.Tensor = torch.stack(seq_1)
-        seq_1: torch.Tensor = self.pos_encoder_array(seq_1)
+        # seq_1: torch.Tensor = self.pos_encoder_array(seq_1)
         seq_2: torch.Tensor = torch.stack(seq_2)
-        seq_2: torch.Tensor = self.pos_encoder_array(seq_2)
+        # seq_2: torch.Tensor = self.pos_encoder_array(seq_2)
+
+        attn_output_1_g, _ = self.feature_extractors_array_1(seq_1, seq_1, seq_1)
+        attn_output_2_g, _ = self.feature_extractors_array_2(seq_2, seq_2, seq_2)
+        features_seq: torch.Tensor = torch.cat((attn_output_1_g, attn_output_2_g), dim=1)
+        # features_seq = self.pos_encoder_cat(features_seq)
 
         # Gestures Labeler
-        attn_output_1_g, _ = self.gesture_labeler_array_1(seq_1, seq_1, seq_1)
-        attn_output_2_g, _ = self.gesture_labeler_array_2(seq_2, seq_2, seq_2)
-        seq_g: torch.Tensor = torch.cat((attn_output_1_g, attn_output_2_g), dim=1)
-        seq_g = self.pos_encoder_cat(seq_g)
-        attn_output_g, _ = self.gesture_labeler_cat(seq_g, seq_g, seq_g)
+        attn_output_g, _ = self.gesture_labeler(features_seq, features_seq, features_seq)
         mlp_g_input = torch.tensor([])
         for (index, item) in enumerate(attn_output_g):
             label = self.gesture_label_extractors[index](item)
@@ -72,13 +78,8 @@ class RTGRFID(nn.Module):
         gestures_output = self.gesture_mlp(mlp_g_input)
 
         # User Labeler
-        seq_1_u = GradientReversalLayer.apply(seq_1, alpha)
-        seq_2_u = GradientReversalLayer.apply(seq_2, alpha)
-        attn_output_1_u, _ = self.user_labeler_array_1(seq_1_u, seq_1_u, seq_1_u)
-        attn_output_2_u, _ = self.user_labeler_array_2(seq_2_u, seq_2_u, seq_2_u)
-        seq_u: torch.Tensor = torch.cat((attn_output_1_u, attn_output_2_u), dim=1)
-        seq_u = self.pos_encoder_cat(seq_u)
-        attn_output_u, _ = self.user_labeler_cat(seq_u, seq_u, seq_u)
+        features_seq_reversed = GradientReversalLayer.apply(features_seq, alpha)
+        attn_output_u, _ = self.user_labeler(features_seq_reversed, features_seq_reversed, features_seq_reversed)
         mlp_u_input = torch.tensor([])
         for (index, item) in enumerate(attn_output_u):
             label = self.user_label_extractors[index](item)
