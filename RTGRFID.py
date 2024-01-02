@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 
-import GradientReversalLayer
+from GradientReversalLayer import GradientReversalLayer
 from PositionalEncoding import PositionalEncoding
 
 
@@ -10,7 +10,6 @@ from PositionalEncoding import PositionalEncoding
 class RTGRFID(nn.Module):
     def __init__(self, seq_len: int, num_gestures: int, num_users: int) -> None:
         super().__init__()
-        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.num_gestures = num_gestures
         self.num_users = num_users
         self.seq_len = seq_len
@@ -44,33 +43,25 @@ class RTGRFID(nn.Module):
         seq_2: list[torch.Tensor] = []
         for frame in x:
             # 每个frame包含两个阵列
-            rss, phase = frame[0]
-            rss, phase = np.array([rss]), np.array([phase])
-            rss_tensor = torch.from_numpy(rss)
-            phase_tensor = torch.from_numpy(phase)
-            merged_array_feature = torch.cat(
-                (rss_tensor, phase_tensor), 1)
+            rss_tensor, phase_tensor = frame[0]
+            merged_array_feature = torch.stack(
+                (rss_tensor, phase_tensor), 0)
             seq_1.append(merged_array_feature.flatten())
 
             # 每个frame包含两个阵列
-            rss, phase = frame[1]
-            rss, phase = np.array([rss]), np.array([phase])
-            rss_tensor = torch.from_numpy(rss)
-            phase_tensor = torch.from_numpy(phase)
+            rss_tensor, phase_tensor = frame[1]
             merged_array_feature = torch.cat(
                 (rss_tensor, phase_tensor), 1)
             seq_2.append(merged_array_feature.flatten())
 
         seq_1: torch.Tensor = torch.stack(seq_1)
-        seq_1 = self.pos_encoder_array(seq_1)
+        seq_1: torch.Tensor = self.pos_encoder_array(seq_1)
         seq_2: torch.Tensor = torch.stack(seq_2)
-        seq_2 = self.pos_encoder_array(seq_2)
+        seq_2: torch.Tensor = self.pos_encoder_array(seq_2)
 
         # Gestures Labeler
-        seq_1_g = seq_1.copy()
-        seq_2_g = seq_2.copy()
-        attn_output_1_g, _ = self.gesture_labeler_array_1(seq_1_g, seq_1_g, seq_1_g)
-        attn_output_2_g, _ = self.gesture_labeler_array_2(seq_2_g, seq_2_g, seq_2_g)
+        attn_output_1_g, _ = self.gesture_labeler_array_1(seq_1, seq_1, seq_1)
+        attn_output_2_g, _ = self.gesture_labeler_array_2(seq_2, seq_2, seq_2)
         seq_g: torch.Tensor = torch.cat((attn_output_1_g, attn_output_2_g), dim=1)
         seq_g = self.pos_encoder_cat(seq_g)
         attn_output_g, _ = self.gesture_labeler_cat(seq_g, seq_g, seq_g)
@@ -81,10 +72,8 @@ class RTGRFID(nn.Module):
         gestures_output = self.gesture_mlp(mlp_g_input)
 
         # User Labeler
-        seq_1_u = seq_1.copy()
-        seq_2_u = seq_2.copy()
-        seq_1_u = GradientReversalLayer.GradientReversalLayer(seq_1_u, alpha)
-        seq_2_u = GradientReversalLayer.GradientReversalLayer(seq_2_u, alpha)
+        seq_1_u = GradientReversalLayer.apply(seq_1, alpha)
+        seq_2_u = GradientReversalLayer.apply(seq_2, alpha)
         attn_output_1_u, _ = self.user_labeler_array_1(seq_1_u, seq_1_u, seq_1_u)
         attn_output_2_u, _ = self.user_labeler_array_2(seq_2_u, seq_2_u, seq_2_u)
         seq_u: torch.Tensor = torch.cat((attn_output_1_u, attn_output_2_u), dim=1)
@@ -93,7 +82,7 @@ class RTGRFID(nn.Module):
         mlp_u_input = torch.tensor([])
         for (index, item) in enumerate(attn_output_u):
             label = self.user_label_extractors[index](item)
-            mlp_u_input = torch.cat((mlp_u_input, label), 1)
+            mlp_u_input = torch.cat((mlp_u_input, label), 0)
         user_output = self.user_mlp(mlp_u_input)
 
         return gestures_output, user_output
